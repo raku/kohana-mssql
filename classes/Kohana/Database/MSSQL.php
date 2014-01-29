@@ -6,130 +6,23 @@
 */
 class Kohana_Database_MSSQL extends Database_PDO {
     
-    public function query($type, $sql, $as_object = FALSE, array $params = NULL)
+    public function prepare($sql)
     {
         // Make sure the database is connected
         $this->_connection or $this->connect();
         
-        // Mssql specific
-        if(preg_match("/OFFSET ([0-9]+)/i",$sql,$matches))
-        {
-            list($replace,$offset) = $matches;
-            $sql = str_replace($replace,'',$sql);
-        }
-
-        if(preg_match("/LIMIT ([0-9]+)/i",$sql,$matches))
-        {
-            list($replace,$limit) = $matches;
-            $sql = str_replace($replace,'',$sql);
-        }
-
-        if(isset($limit) || isset($offset))
-        {
-            if (!isset($offset)) 
-            {
-                $sql = preg_replace("/^(SELECT|DELETE|UPDATE)\s/i", "$1 TOP " . $limit . ' ', $sql);
-            } 
-            else 
-            {
-                $ob_count = (int)preg_match_all('/ORDER BY/i',$sql,$ob_matches,PREG_OFFSET_CAPTURE);
-
-                if($ob_count < 1) 
-                {
-                    $over = 'ORDER BY (SELECT 0)';
-                } 
-                else 
-                {
-                    $ob_last = array_pop($ob_matches[0]);
-                    $orderby = strrchr($sql, $ob_last[0]);
-                    $over = preg_replace('/[^,\s]*\.([^,\s]*)/i', 'inner_tbl.$1', $orderby);
-                    
-                    // Remove ORDER BY clause from $sql
-                    $sql = substr($sql, 0, $ob_last[1]);
-                }
-                
-                // Add ORDER BY clause as an argument for ROW_NUMBER()
-                $sql = "SELECT ROW_NUMBER() OVER ($over) AS KOHANA_DB_ROWNUM, * FROM ($sql) AS inner_tbl";
-              
-                $start = $offset + 1;
-                $end = $offset + $limit;
-
-                $sql = "WITH outer_tbl AS ($sql) SELECT * FROM outer_tbl WHERE KOHANA_DB_ROWNUM BETWEEN $start AND $end";
-            }
-        }
-
-        if ( ! empty($this->_config['profiling']))
-        {
-            // Benchmark this query for the current instance
-            $benchmark = Profiler::start("Database ({$this->_instance})", $sql);
-        }
-
-        try
-        {
-            $result = $this->_connection->query($sql);
-        }
-        catch (Exception $e)
-        {
-            if (isset($benchmark))
-            {
-                // This benchmark is worthless
-                Profiler::delete($benchmark);
-            }
-
-            $errArr = $this->_connection->errorInfo();
-            $resultTextError = $this->_connection->query( "select * from sys.messages where  language_id=1033 and message_id=".arr::get($errArr, 1, 0) )->fetchAll();
-            
-            // Convert the exception in a database exception
-            throw new Database_Exception('[:code] :error ( :info )', array(
-                ':code' => $e->getCode(),
-                ':error' => $e->getMessage(),
-                #':query' => $sql,
-                ':info' =>  arr::get($resultTextError[0], 'text')
-            ), $e->getCode());
-        }
-
-        if (isset($benchmark))
-        {
-            Profiler::stop($benchmark);
-        }
-
-        // Set the last query
-        $this->last_query = $sql;
-
-        if ($type === Database::SELECT)
-        {
-            // Convert the result into an array, as PDOStatement::rowCount is not reliable
-            if ($as_object === FALSE)
-            {
-                $result->setFetchMode(PDO::FETCH_ASSOC);
-            }
-            elseif (is_string($as_object))
-            {
-                $result->setFetchMode(PDO::FETCH_CLASS, $as_object, $params);
-            }
-            else
-            {
-                $result->setFetchMode(PDO::FETCH_CLASS, 'stdClass');
-            }
-
-            $result = $result->fetchAll();
-
-            // Return an iterator of results
-            return new Database_Result_Cached($result, $sql, $as_object, $params);
-        }
-        elseif ($type === Database::INSERT)
-        {
-            // Return a list of insert id and rows created
-            return array(
-                $this->insert_id(),
-                $result->rowCount(),
-            );
-        }
-        else
-        {
-            // Return the number of rows affected
-            return $result->rowCount();
-        }
+        // MSSQL specific SQL
+        $sql = $this->_convert_sql($sql);
+        
+        return $this->_connection->prepare($sql);
+    }
+    
+    public function query($type, $sql, $as_object = FALSE, array $params = NULL)
+    {
+        // MSSQL specific SQL
+        $sql = $this->_convert_sql($sql);
+        
+        return parent::query($type, $sql, $as_object, $params);
     }
     
     public function insert_id()
@@ -240,5 +133,139 @@ class Kohana_Database_MSSQL extends Database_PDO {
     }
 
     public function set_charset($charset){}
+    
+    private function _convert_sql($sql)
+    {
+        if(preg_match("/OFFSET ([0-9]+)/i",$sql,$matches))
+        {
+            list($replace,$offset) = $matches;
+            $sql = str_replace($replace,'',$sql);
+        }
+
+        if(preg_match("/LIMIT ([0-9]+)/i",$sql,$matches))
+        {
+            list($replace,$limit) = $matches;
+            $sql = str_replace($replace,'',$sql);
+        }
+
+        if(isset($limit) || isset($offset))
+        {
+            if (!isset($offset)) 
+            {
+                $sql = preg_replace("/^(SELECT|DELETE|UPDATE)\s/i", "$1 TOP " . $limit . ' ', $sql);
+            } 
+            else 
+            {
+                $ob_count = (int)preg_match_all('/ORDER BY/i',$sql,$ob_matches,PREG_OFFSET_CAPTURE);
+
+                if($ob_count < 1) 
+                {
+                    $over = 'ORDER BY (SELECT 0)';
+                } 
+                else 
+                {
+                    $ob_last = array_pop($ob_matches[0]);
+                    $orderby = strrchr($sql, $ob_last[0]);
+                    $over = preg_replace('/[^,\s]*\.([^,\s]*)/i', 'inner_tbl.$1', $orderby);
+                    
+                    // Remove ORDER BY clause from $sql
+                    $sql = substr($sql, 0, $ob_last[1]);
+                }
+                
+                // Add ORDER BY clause as an argument for ROW_NUMBER()
+                $sql = "SELECT ROW_NUMBER() OVER ($over) AS KOHANA_DB_ROWNUM, * FROM ($sql) AS inner_tbl";
+              
+                $start = $offset + 1;
+                $end = $offset + $limit;
+
+                $sql = "WITH outer_tbl AS ($sql) SELECT * FROM outer_tbl WHERE KOHANA_DB_ROWNUM BETWEEN $start AND $end";
+            }
+        }
+        return $sql;
+    }
+    
+    /*
+    public function query($type, $sql, $as_object = FALSE, array $params = NULL)
+    {
+        // Make sure the database is connected
+        $this->_connection or $this->connect();
+        
+        // MSSQL specific SQL
+        $sql = $this->_sql($sql);
+
+        if ( ! empty($this->_config['profiling']))
+        {
+            // Benchmark this query for the current instance
+            $benchmark = Profiler::start("Database ({$this->_instance})", $sql);
+        }
+
+        try
+        {
+            $result = $this->_connection->query($sql);
+        }
+        catch (Exception $e)
+        {
+            if (isset($benchmark))
+            {
+                // This benchmark is worthless
+                Profiler::delete($benchmark);
+            }
+
+            $errArr = $this->_connection->errorInfo();
+            $resultTextError = $this->_connection->query( "select * from sys.messages where  language_id=1033 and message_id=".arr::get($errArr, 1, 0) )->fetchAll();
+            
+            // Convert the exception in a database exception
+            throw new Database_Exception('[:code] :error ( :info )', array(
+                ':code' => $e->getCode(),
+                ':error' => $e->getMessage(),
+                #':query' => $sql,
+                ':info' =>  arr::get($resultTextError[0], 'text')
+            ), $e->getCode());
+        }
+
+        if (isset($benchmark))
+        {
+            Profiler::stop($benchmark);
+        }
+
+        // Set the last query
+        $this->last_query = $sql;
+
+        if ($type === Database::SELECT)
+        {
+            // Convert the result into an array, as PDOStatement::rowCount is not reliable
+            if ($as_object === FALSE)
+            {
+                $result->setFetchMode(PDO::FETCH_ASSOC);
+            }
+            elseif (is_string($as_object))
+            {
+                $result->setFetchMode(PDO::FETCH_CLASS, $as_object, $params);
+            }
+            else
+            {
+                $result->setFetchMode(PDO::FETCH_CLASS, 'stdClass');
+            }
+
+            $result = $result->fetchAll();
+
+            // Return an iterator of results
+            return new Database_Result_Cached($result, $sql, $as_object, $params);
+        }
+        elseif ($type === Database::INSERT)
+        {
+            // Return a list of insert id and rows created
+            return array(
+                $this->insert_id(),
+                $result->rowCount(),
+            );
+        }
+        else
+        {
+            // Return the number of rows affected
+            return $result->rowCount();
+        }
+    }
+    */
 
 }
