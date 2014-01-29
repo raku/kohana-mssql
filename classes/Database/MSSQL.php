@@ -1,6 +1,6 @@
 <?php defined('SYSPATH') or die('No direct script access.');
 
-class Database_MsSQL extends Kohana_Database_MsSQL
+class Database_MSSQL extends Kohana_Database_MSSQL
 {
     public function connection()
     {
