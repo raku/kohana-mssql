@@ -152,7 +152,7 @@ class Kohana_Database_MSSQL extends Database_PDO {
         {
             if (!isset($offset)) 
             {
-                $sql = preg_replace("/^(SELECT|DELETE|UPDATE)\s/i", "$1 TOP " . $limit . ' ', $sql);
+                $sql = preg_replace("/^(SELECT DISTINCT|SELECT|DELETE|UPDATE)\s/i", "$1 TOP " . $limit . ' ', $sql);
             } 
             else 
             {
